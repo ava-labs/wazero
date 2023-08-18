@@ -418,8 +418,7 @@ type Function interface {
 
 // Meter collects the cost for a set of operations.
 type Meter interface {
-	AddCost(string)
-	GetCost() uint64
+	AddCost(context.Context, string) error
 }
 
 // GoModuleFunction is a Function implemented in Go instead of a wasm binary.

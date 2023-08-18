@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -112,11 +113,11 @@ func (c *Context) RandSource() io.Reader {
 }
 
 // AddMeterCost increments the total based on the cost of an operation.
-func (c *Context) AddMeterCost(op string) int {
+func (c *Context) AddMeterCost(ctx context.Context, op string) error {
 	if c.meter != nil {
-		c.meter.AddCost(op)
+		return c.meter.AddCost(ctx, op)
 	}
-	return 0
+	return nil
 }
 
 // DefaultContext returns Context with no values set except a possible nil

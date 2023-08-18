@@ -539,7 +539,9 @@ func (ce *callEngine) call(ctx context.Context, params, results []uint64) (_ []u
 		defer done()
 	}
 
-	ce.callFunction(ctx, m, ce.f)
+	if err := ce.callFunction(ctx, m, ce.f);err != nil {
+		return nil, err
+	}
 
 	// This returns a safe copy of the results, instead of a slice view. If we
 	// returned a re-slice, the caller could accidentally or purposefully
@@ -594,14 +596,17 @@ func (ce *callEngine) recoverOnCall(ctx context.Context, m *wasm.ModuleInstance,
 	return
 }
 
-func (ce *callEngine) callFunction(ctx context.Context, m *wasm.ModuleInstance, f *function) {
+func (ce *callEngine) callFunction(ctx context.Context, m *wasm.ModuleInstance, f *function) error {
 	if f.parent.hostFn != nil {
 		ce.callGoFuncWithStack(ctx, m, f)
 	} else if lsn := f.parent.listener; lsn != nil {
-		ce.callNativeFuncWithListener(ctx, m, f, lsn)
+		if _, err := ce.callNativeFuncWithListener(ctx, m, f, lsn); err != nil {
+			return err
+		}
 	} else {
-		ce.callNativeFunc(ctx, m, f)
+		return ce.callNativeFunc(ctx, m, f)
 	}
+	return nil
 }
 
 func (ce *callEngine) callGoFunc(ctx context.Context, m *wasm.ModuleInstance, f *function, stack []uint64) {
@@ -632,7 +637,7 @@ func (ce *callEngine) callGoFunc(ctx context.Context, m *wasm.ModuleInstance, f 
 	}
 }
 
-func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance, f *function) {
+func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance, f *function) error {
 	frame := &callFrame{f: f, base: len(ce.stack)}
 	moduleInst := f.moduleInstance
 	functions := moduleInst.Engine.(*moduleEngine).functions
@@ -648,7 +653,9 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 	sctx := m.Sys
 	for frame.pc < bodyLen {
 		op := &body[frame.pc]
-		sctx.AddMeterCost(op.String())
+		if err := sctx.AddMeterCost(ctx, op.String()); err != nil {
+			return err
+		}
 		// TODO: add description of each operation/case
 		// on, for example, how many args are used,
 		// how the stack is modified, etc.
@@ -3904,6 +3911,8 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 		}
 	}
 	ce.popFrame()
+
+	return nil
 }
 
 func WasmCompatMax32bits(v1, v2 uint32) uint64 {
@@ -4102,15 +4111,17 @@ func i32Abs(v uint32) uint32 {
 	}
 }
 
-func (ce *callEngine) callNativeFuncWithListener(ctx context.Context, m *wasm.ModuleInstance, f *function, fnl experimental.FunctionListener) context.Context {
+func (ce *callEngine) callNativeFuncWithListener(ctx context.Context, m *wasm.ModuleInstance, f *function, fnl experimental.FunctionListener) (context.Context, error) {
 	def, typ := f.definition(), f.funcType
 
 	ce.stackIterator.reset(ce.stack, ce.frames, f)
 	fnl.Before(ctx, m, def, ce.peekValues(len(typ.Params)), &ce.stackIterator)
 	ce.stackIterator.clear()
-	ce.callNativeFunc(ctx, m, f)
+	if err := ce.callNativeFunc(ctx, m, f); err != nil {
+		return nil, err
+	}
 	fnl.After(ctx, m, def, ce.peekValues(len(typ.Results)))
-	return ctx
+	return ctx, nil
 }
 
 // popMemoryOffset takes a memory offset off the stack for use in load and store instructions.
